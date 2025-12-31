@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Diagnóstico IA</title>
+<style>
+body { background:#111; color:#fff; font-family:Arial; text-align:center }
+.box { border:1px solid #444; padding:15px; margin:10px auto; width:350px }
+canvas { background:#000; }
+button { padding:10px 20px; margin:5px; }
+.green { color:#0f0 }
+.red { color:#f00 }
+.yellow { color:#ff0 }
+</style>
+</head>
+
+<body>
+
+<h2>MONITOREO DE FALLAS – IA</h2>
+<button onclick="connect()">Conectar Bluetooth</button>
+<p id="status">Desconectado</p>
+
+<div class="box">
+<h3 class="red">Gestos 1 – Bobinado</h3>
+<div id="g1">0.0000</div>
+<canvas id="c1" width="300" height="80"></canvas>
+</div>
+
+<div class="box">
+<h3 class="yellow">Gestos 2 – Rodamiento</h3>
+<div id="g2">0.0000</div>
+<canvas id="c2" width="300" height="80"></canvas>
+</div>
+
+<div class="box">
+<h3>CONTROL MOTOR</h3>
+<button onclick="sendCmd('REARME')">REARME</button>
+</div>
+
+<div class="box" id="lubBox" style="display:none">
+<h3>SISTEMA DE LUBRICACIÓN</h3>
+<button onclick="sendCmd('LUB_ON')">LUBRICAR</button>
+<button onclick="sendCmd('LUB_OFF')">DETENER</button>
+</div>
+
+<script>
+let tx, rx;
+let g1data=[], g2data=[];
+const maxPoints = 60;
+
+function draw(ctx, data, color){
+  ctx.clearRect(0,0,300,80);
+  ctx.strokeStyle = color;
+  ctx.beginPath();
+  data.forEach((v,i)=>{
+    let x = i*5;
+    let y = 80 - v*80;
+    i?ctx.lineTo(x,y):ctx.moveTo(x,y);
+  });
+  ctx.stroke();
+}
+
+async function connect(){
+  const device = await navigator.bluetooth.requestDevice({
+    filters:[{name:"ESP32_GESTOS"}],
+    optionalServices:["6e400001-b5a3-f393-e0a9-e50e24dcca9e"]
+  });
+
+  const server = await device.gatt.connect();
+  const service = await server.getPrimaryService("6e400001-b5a3-f393-e0a9-e50e24dcca9e");
+
+  tx = await service.getCharacteristic("6e400003-b5a3-f393-e0a9-e50e24dcca9e");
+  rx = await service.getCharacteristic("6e400002-b5a3-f393-e0a9-e50e24dcca9e");
+
+  tx.startNotifications();
+  tx.addEventListener("characteristicvaluechanged", e=>{
+    let txt = new TextDecoder().decode(e.target.value);
+    let g1 = parseFloat(txt.split(",")[0].split(":")[1]);
+    let g2 = parseFloat(txt.split(",")[1].split(":")[1]);
+
+    document.getElementById("g1").innerText = g1.toFixed(4);
+    document.getElementById("g2").innerText = g2.toFixed(4);
+
+    g1data.push(g1); g2data.push(g2);
+    if(g1data.length>maxPoints) g1data.shift();
+    if(g2data.length>maxPoints) g2data.shift();
+
+    draw(c1.getContext("2d"), g1data, "red");
+    draw(c2.getContext("2d"), g2data, "yellow");
+
+    if(g2 > 0.4600) document.getElementById("lubBox").style.display="block";
+  });
+
+  status.innerText="Conectado";
+}
+
+function sendCmd(cmd){
+  rx.writeValue(new TextEncoder().encode(cmd));
+}
+</script>
+
+</body>
+</html>
